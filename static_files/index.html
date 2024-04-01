@@ -1860,37 +1860,48 @@
     jQuery(document).ready(function ($) {
         $('#site-footer').hide();
 
+        function postTemplate(post, recent) {
+            return `
+            <div class="post-content" id="post_${post.id}" style="${recent ? 'background-color:#f3f3f3' : 'background-color:white'}">   <input type="hidden" id="current_post_id" value="${post.id}">
+                    <div class="post-title">
+                         <h3><a href="${post.link}">${post.title.rendered}</a></h3>
+                    </div>
+                    <div class="post-meta">
+                        <span>Posted By:</span>
+                             <a href="https://nashvillesevereweather.com/2024/04/01/update-on-tuesdays-severe-weather-potential/">
+                              <span class="auth-name">${post.yoast_head_json.author}</span>
+                            <span>On: </span><span class="date">${new Date(post.date_gmt).toLocaleString()}</span>
+                            </a>
+                </div>
+
+                ${post.content.rendered}
+            </div>
+            `;
+        }
+
         var displayedPostIds = [];
+
         function refreshPosts() {
             var currentPostId = $('#current_post_id').val();
+
 
             // AJAX request
             $.ajax({
                 type: 'GET',
-                url: 'https://nashvillesevereweather.com/wp-admin/admin-ajax.php',
-                data: {
-                    action: 'refresh_posts_action',
-                    current_post_id: currentPostId,
-                },
+                url: '/api/recent-posts',
                 success: function (response) {
                     $('.loader3').hide();
                     $('#site-footer').show();
-                    var responseData = $.parseJSON(response);
-                    var postIDs = $(responseData.html).find('.presets').map(function () {
-                        return $(this).data('postid');
-                    }).get();
+                    let firstPost = true;
 
-                    var newPostIDs = postIDs.filter(function (postID) {
-                        return displayedPostIds.indexOf(postID) === -1;
-                    });
-                    if (newPostIDs.length > 0) {
-                        $('#dynamic_post').prepend(responseData.html);
-                        displayedPostIds = displayedPostIds.concat(newPostIDs);
-                    }
+                    response.forEach(post => {
+                        displayedPostIds.push(post.id);
+                        $('#dynamic_post').append(postTemplate(post, firstPost));
+                        if (firstPost) {
+                            firstPost = false;
+                        }
 
-
-
-
+                    })
 
                 },
                 error: function (xhr, status, error) {
