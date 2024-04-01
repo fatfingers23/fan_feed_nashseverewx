@@ -12,6 +12,9 @@ use redis::{Client, Commands, RedisResult};
 use crate::wp_admin_response::Root;
 
 
+const REDIS_POSTS_KEY: &str = "recent_posts";
+const KEY_EXPIRE: u64 = 3_600;
+
 /// End point that gets called to load in posts json from WP Admin
 #[get("/recent-posts")]
 async fn cached_wp_admin(redis_client: Data<Client>) -> Result<HttpResponse, Error> {
@@ -27,15 +30,26 @@ async fn cached_wp_admin(redis_client: Data<Client>) -> Result<HttpResponse, Err
     }
 }
 
+/// End point that gets called to clear the cache
+#[get("/clear-cache")]
+async fn clear_cache(redis_client: Data<Client>) -> Result<HttpResponse, Error> {
+    let mut redis_connection = redis_client.get_connection().expect("Failed to get Redis connection");
+    let _: () = redis_connection.del(REDIS_POSTS_KEY).expect("Failed to delete key from Redis");
+    Ok(HttpResponse::Ok().body("Cache Cleared"))
+}
+
+
 /// This method checks the cache to see if the posts are already stored in Redis. If they are, it returns the posts.
 /// If not it calls the wp api endpoint
 async fn get_or_set_posts(redis_client: Data<Client>) -> Result<Root, anyhow::Error> {
-    let posts_key = "recent_posts";
     let mut redis_connection = redis_client.get_connection().expect("Failed to get Redis connection");
-    let exists: RedisResult<bool> = redis_connection.exists(posts_key);
+    let exists: RedisResult<bool> = redis_connection.exists(REDIS_POSTS_KEY);
 
     let does_key_exist = match exists {
-        Ok(exists) => exists,
+        Ok(exists) => {
+            let _: () = redis::cmd("EXPIRE").arg(REDIS_POSTS_KEY).arg(KEY_EXPIRE).execute(&mut redis_connection);
+            exists
+        }
         Err(err) => {
             error!("Failed to check if key exists: {:?}", err);
             return Err(anyhow!("Failed to check if key exists"));
@@ -44,7 +58,7 @@ async fn get_or_set_posts(redis_client: Data<Client>) -> Result<Root, anyhow::Er
 
     match does_key_exist {
         true => {
-            let posts: RedisResult<String> = redis_connection.get(posts_key);
+            let posts: RedisResult<String> = redis_connection.get(REDIS_POSTS_KEY);
             return match posts {
                 Ok(posts) => {
                     let posts_json: Root = serde_json::from_str(&posts).expect("Failed to parse JSON from Redis");
@@ -61,7 +75,7 @@ async fn get_or_set_posts(redis_client: Data<Client>) -> Result<Root, anyhow::Er
             match web_call {
                 Ok(result) => {
                     let posts_json = serde_json::to_string(&result).expect("Failed to serialize JSON");
-                    let _: () = redis_connection.set(posts_key, posts_json).expect("Failed to set posts in Redis");
+                    let _: () = redis_connection.set_ex(REDIS_POSTS_KEY, posts_json, KEY_EXPIRE).expect("Failed to set posts in Redis");
                     Ok(result)
                 }
                 Err(err) => {
@@ -107,8 +121,9 @@ async fn fetch_recent_posts() -> anyhow::Result<Root, anyhow::Error> {
 async fn main() -> std::io::Result<()> {
     use actix_web::{web, App, HttpServer};
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
-
-    let redis_client = redis::Client::open("redis://127.0.0.1/")
+    dotenv::dotenv().ok();
+    let redis_url = std::env::var("REDIS_ADDR").expect("REDIS_ADDR must be set");
+    let redis_client = redis::Client::open(redis_url)
         .expect("Failed to connect to Redis");
 
     HttpServer::new(move ||
@@ -122,13 +137,15 @@ async fn main() -> std::io::Result<()> {
                     .allow_any_method(),
             )
             .service(
-                web::scope("/api").service(cached_wp_admin)
+                web::scope("/api")
+                    .service(cached_wp_admin)
+                    .service(clear_cache)
             )
             .service(Files::new("/", "./static_files")
                 .index_file("index.html"))
     )
 
-        .bind(("127.0.0.1", 8080))?
+        .bind(("0.0.0.0", 8080))?
         .run()
         .await
 }
