@@ -4,7 +4,7 @@ use actix_files::{Files};
 use actix_cors::Cors;
 use actix_web::{Error, get, HttpResponse};
 use actix_web::error::ErrorBadRequest;
-use log::{error};
+use log::{error, info};
 use actix_web::middleware::Logger;
 use actix_web::web::Data;
 use anyhow::anyhow;
@@ -98,7 +98,6 @@ async fn fetch_recent_posts() -> anyhow::Result<Root, anyhow::Error> {
     match res {
         Ok(result) => {
             let result_json = result.json::<Root>().await;
-            // Err(anyhow!("Failed to parse JSON from WP Admin"))
             match result_json {
                 Ok(json) => {
                     Ok(json)
@@ -123,6 +122,7 @@ async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
     dotenv::dotenv().ok();
     let redis_url = std::env::var("REDIS_ADDR").expect("REDIS_ADDR must be set");
+    info!("Connecting to Redis at: {}", redis_url);
     let redis_client = redis::Client::open(redis_url)
         .expect("Failed to connect to Redis");
 
@@ -141,6 +141,8 @@ async fn main() -> std::io::Result<()> {
                     .service(cached_wp_admin)
                     .service(clear_cache)
             )
+            .service(Files::new("/css", "./static_files/css").show_files_listing())
+            .service(Files::new("/js", "./static_files/js"))
             .service(Files::new("/", "./static_files")
                 .index_file("index.html"))
     )
