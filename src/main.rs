@@ -141,7 +141,7 @@ async fn main() -> std::io::Result<()> {
                     .service(cached_wp_admin)
                     .service(clear_cache)
             )
-            .service(Files::new("/css", "./static_files/css").show_files_listing())
+            .service(Files::new("/css", "./static_files/css"))
             .service(Files::new("/js", "./static_files/js"))
             .service(Files::new("/", "./static_files")
                 .index_file("index.html"))
